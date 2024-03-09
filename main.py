@@ -1,18 +1,18 @@
 import os, sys
 import gymnasium as gym
 import time
-from agent import MCTSAgent
+from mtcs_agent import MCTSAgent
 import text_flappy_bird_gym
 
 if __name__ == '__main__':
 
     # initiate environment
-    env = gym.make('TextFlappyBird-screen-v0', height = 15, width = 20, pipe_gap = 4)
+    env = gym.make('TextFlappyBird-v0', height = 15, width = 20, pipe_gap = 4)
     obs = env.reset()
     agent = MCTSAgent(env)
     # iterate
     while True:
-
+        print(obs)
         # Select next action
         #action = env.action_space.sample()  # for an agent, 
         action = agent.policy(obs)

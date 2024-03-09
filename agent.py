@@ -1,90 +1,106 @@
 import numpy as np
 
-class MCTSAgent:
-    def __init__(self, env, max_simulations=1000, exploration_constant=2):
+class MCQAgent: #Working well
+    def __init__(self, env, learning_rate=0.1, discount_factor=0.95, epsilon=0.1):
         self.env = env
-        self.max_simulations = max_simulations
-        self.exploration_constant = exploration_constant
-        self.action_space = env.action_space
+        self.learning_rate = learning_rate
+        self.discount_factor = discount_factor
+        self.epsilon = epsilon
+        self.state = None
+        self.q_table = {}
 
     def policy(self, state):
-        root = MCTSNode(state, None)
-
-        # Expand the root node before running simulations
-        state, root = self.expand(root)
-
-        for _ in range(self.max_simulations):
-            node = root
-            state = root.state
-
-            # Selection
-            while not node.is_terminal:
-                state, node = self.select(node)
-
-            # Expansion
-            if not node.is_leaf:
-                state, node = self.expand(node)
-
-            # Simulation
-            reward = self.simulate(state)
-
-            # Backpropagation
-            self.backpropagate(node, reward)
-        # Choose the action with the highest visit count
-        if root.children:
-            action = root.children.index(max(root.children, key=lambda child: child.visit_count))
-        else:
-            action = self.env.action_space.sample()
+        # Convert the state into a tuple of its components
+        #round distance to 1 decimal places to reduce the number of states
         
+        if state not in self.q_table.keys():
+            self.q_table[state] = np.zeros(self.env.action_space.n)
+
+        if np.random.rand() < self.epsilon:
+            action = self.env.action_space.sample()
+        else:
+            action = np.argmax(self.q_table[state])
+
         return action
 
-    def select(self, node):
-        while not node.is_terminal and not node.is_leaf:
-            node = max(node.children, key=lambda child: child.uct_value(self.exploration_constant))
-            state = self.env.render()
-        return state, node
+    def update(self, state, action, reward, next_state, done):
 
-    def expand(self, node):
-        action = self.env.action_space.sample()
-        state = self.env.render()
-        new_node = MCTSNode(state, action, parent=node)
-        node.children.append(new_node)
-        return state, new_node
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(self.env.action_space.n)
 
-    def simulate(self, state):
-        done = False
-        total_reward = 0
+        if next_state not in self.q_table:
+            self.q_table[next_state] = np.zeros(self.env.action_space.n)
 
-        while not done:
-            action = self.env.action_space.sample()
-            state, reward, done, _, _ = self.env.step(action)
-            total_reward += reward
+        q_value = self.q_table[state][action]
+        
+        if done:
+            target = reward
+        else:
+            target = reward + self.discount_factor * np.max(self.q_table[next_state])
 
-        return total_reward
+        self.q_table[state][action] = q_value + self.learning_rate * (target - q_value)
 
-    def backpropagate(self, node, reward):
-        while node is not None:
-            node.visit_count += 1
-            node.total_reward += reward
-            node = node.parent
 
-class MCTSNode:
-    def __init__(self, state, action, parent=None):
-        self.state = state
-        self.action = action
-        self.parent = parent
-        self.children = []
-        self.visit_count = 0
-        self.total_reward = 0
+class NStepTreeBackupAgent:
+    def __init__(self, env, learning_rate=0.1, discount_factor=0.95, n=3, epsilon=0.05):
+        self.env = env
+        self.learning_rate = learning_rate
+        self.discount_factor = discount_factor
+        self.n = n
+        #q_table : (state, action) -> value
+        self.q_table = {}
 
-    def is_leaf(self):
-        return len(self.children) == 0
+        self.epsilon = epsilon
 
-    def is_terminal(self):
-        return self.state.is_terminal()
+    def get_pi_for_action(self, state, action):
+        # Calculate the policy probability for the given action
+        k = self.env.action_space.n
+        pi_action = self.epsilon / k + (1 - self.epsilon) if action == self.policy(state) else self.epsilon / k
+        return pi_action
+    
+    def policy(self, state):
+        values = [self.q_table.get((state, action), 0) for action in range(self.env.action_space.n)]
+        #on peut ajouter un epsilon greedy
+    
+        return np.argmax(values)
+    
 
-    def uct_value(self, exploration_constant):
-        if self.parent is None:
-            return float('inf')
-        return self.total_reward / self.visit_count + exploration_constant * np.sqrt(np.log(self.parent.visit_count) / self.visit_count)
 
+    def select_action(self, state):
+        if state not in self.q_table:
+            self.q_table[state] = np.zeros(self.env.action_space.n)
+
+        if np.random.rand() < self.epsilon:
+            return self.env.action_space.sample()
+        
+        return self.policy(state)
+
+    def update(self, sequence):
+        states, actions, rewards = sequence[:-1], sequence[1:-1], sequence[2:]
+        T = len(states)
+
+        for t in range(T - self.n):
+            tau = t + 1
+            G = rewards[t + self.n] if t + self.n < T else 0
+
+            for k in range(t + self.n, t, -1):
+                state = states[k]
+                action = actions[k]
+
+                # Initialize q_table and policy for state if it doesn't exist
+                if state not in self.q_table:
+                    self.q_table[state] = np.zeros(self.env.action_space.n)
+                    self.policy[state] = np.argmax(self.q_table[state])
+
+                G = rewards[k] + self.discount_factor * (np.dot(self.policy[state], self.q_table[state]) if k + 1 < T else 0) + self.discount_factor * (1 - self.policy[state][action]) * G
+
+            state = states[tau]
+            action = actions[tau]
+
+            # Initialize q_table and policy for state if it doesn't exist
+            if state not in self.q_table:
+                self.q_table[state] = np.zeros(self.env.action_space.n)
+                self.policy[state] = np.argmax(self.q_table[state])
+
+            self.q_table[state][action] += self.learning_rate * (G - self.q_table[state][action])
+            self.policy[state] = np.argmax(self.q_table[state])
